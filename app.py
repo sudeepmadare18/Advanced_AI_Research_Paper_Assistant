@@ -1,491 +1,489 @@
 
 import streamlit as st
-from datetime import datetime
+import pandas as pd
 
-# -----------------------------------------
+from src.rag_pipeline import (
+    build_research_index,
+    answer_research_question
+)
+
+
+# ==========================================
 # PAGE CONFIGURATION
-# -----------------------------------------
+# ==========================================
 
 st.set_page_config(
     page_title="ResearchMind AI",
     page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# -----------------------------------------
-# CUSTOM DESIGN
-# -----------------------------------------
+
+# ==========================================
+# CUSTOM STYLING
+# ==========================================
 
 st.markdown("""
 <style>
+    .main {
+        background-color: #0e1117;
+    }
 
-.stApp {
-    background-color: #F5F7FB;
-}
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
 
-[data-testid="stSidebar"] {
-    background-color: #111827;
-}
+    .hero {
+        padding: 30px;
+        border-radius: 16px;
+        background: linear-gradient(
+            120deg,
+            #172554,
+            #312e81,
+            #1e1b4b
+        );
+        margin-bottom: 25px;
+    }
 
-[data-testid="stSidebar"] * {
-    color: #F9FAFB !important;
-}
+    .hero h1 {
+        color: white;
+        font-size: 38px;
+    }
 
-.main-title {
-    font-size: 36px;
-    font-weight: 800;
-    color: #172554;
-}
+    .hero p {
+        color: #dbeafe;
+        font-size: 17px;
+    }
 
-.subtitle {
-    font-size: 16px;
-    color: #64748B;
-}
+    .metric-card {
+        background-color: #1c2333;
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid #30394d;
+    }
 
-.hero {
-    background: linear-gradient(120deg, #172554, #164E63);
-    padding: 32px;
-    border-radius: 18px;
-    color: white;
-    margin-bottom: 25px;
-}
-
-.hero h1 {
-    color: white;
-    font-size: 34px;
-}
-
-.hero p {
-    color: #DCEAFE;
-    font-size: 16px;
-}
-
-.metric-card {
-    background: white;
-    padding: 22px;
-    border-radius: 14px;
-    border: 1px solid #E2E8F0;
-    min-height: 115px;
-}
-
-.metric-label {
-    color: #64748B;
-    font-size: 14px;
-}
-
-.metric-value {
-    font-size: 28px;
-    font-weight: 800;
-    color: #172554;
-}
-
-.section-heading {
-    color: #172554;
-    font-size: 21px;
-    font-weight: 700;
-}
-
-.feature-card {
-    background: white;
-    padding: 22px;
-    border-radius: 14px;
-    border: 1px solid #E2E8F0;
-    min-height: 150px;
-}
-
-.feature-card h3 {
-    color: #172554;
-}
-
-.feature-card p {
-    color: #64748B;
-    font-size: 14px;
-}
-
-div.stButton > button {
-    border-radius: 9px;
-    font-weight: 600;
-}
-
+    .citation {
+        background-color: #172033;
+        padding: 12px;
+        border-radius: 8px;
+        border-left: 4px solid #6366f1;
+        margin-bottom: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
-# -----------------------------------------
+# ==========================================
 # SESSION STATE
-# -----------------------------------------
+# ==========================================
+
+if "research_index" not in st.session_state:
+    st.session_state.research_index = None
 
 if "uploaded_papers" not in st.session_state:
-    st.session_state.uploaded_papers = {}
+    st.session_state.uploaded_papers = []
 
-if "page" not in st.session_state:
-    st.session_state.page = "Dashboard"
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 
-# -----------------------------------------
+# ==========================================
+# API KEY
+# ==========================================
+
+groq_api_key = st.secrets.get("GROQ_API_KEY", "")
+
+
+# ==========================================
 # SIDEBAR
-# -----------------------------------------
+# ==========================================
 
 with st.sidebar:
 
-    st.markdown("# 📚 ResearchMind")
-    st.caption("ADVANCED AI RESEARCH WORKSPACE")
+    st.title("📚 ResearchMind AI")
+
+    st.caption("Advanced AI Research Assistant")
 
     st.divider()
 
-    st.markdown("### WORKSPACE")
-
-    pages = [
-        "Dashboard",
-        "Paper Library",
-        "Ask AI",
-        "Compare Papers",
-        "Research Summary",
-        "RAG Analytics"
-    ]
-
-    for page in pages:
-        if st.button(
-            page,
-            key=f"nav_{page}",
-            use_container_width=True
-        ):
-            st.session_state.page = page
+    page = st.radio(
+        "Navigation",
+        [
+            "Dashboard",
+            "Paper Library",
+            "Ask AI",
+            "RAG Analytics"
+        ]
+    )
 
     st.divider()
 
-    st.markdown("### SYSTEM STATUS")
-    st.success("Application interface ready")
+    st.markdown("### System Status")
 
-    st.caption("Powered by Groq + Hugging Face")
+    if st.session_state.research_index:
+        st.success("Research index ready")
+    else:
+        st.warning("No research index")
+
+    if groq_api_key:
+        st.success("Groq API configured")
+    else:
+        st.error("Groq API key missing")
+
+    st.divider()
+
+    st.caption("ResearchMind AI | RAG Research Project")
 
 
-# -----------------------------------------
-# COMMON DATA
-# -----------------------------------------
-
-paper_count = len(st.session_state.uploaded_papers)
-
-# -----------------------------------------
+# ==========================================
 # DASHBOARD
-# -----------------------------------------
+# ==========================================
 
-if st.session_state.page == "Dashboard":
+if page == "Dashboard":
 
     st.markdown("""
     <div class="hero">
-        <h1>Welcome to ResearchMind AI 👋</h1>
+        <h1>ResearchMind AI</h1>
         <p>
-        Your intelligent research companion.
-        Upload academic papers, explore scientific
-        knowledge and discover insights using advanced RAG.
+        Your intelligent academic research companion.
+        Upload research papers, ask questions and explore
+        evidence-backed answers using advanced RAG.
         </p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("## Research Overview")
+    st.subheader("Research Workspace")
 
-    c1, c2, c3 = st.columns(3)
+    col1, col2, col3 = st.columns(3)
 
-    with c1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <div class="metric-label">Uploaded Papers</div>
-            <div class="metric-value">{paper_count}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    paper_count = len(st.session_state.uploaded_papers)
 
-    with c2:
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">Knowledge Chunks</div>
-            <div class="metric-value">--</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with c3:
-        st.markdown("""
-        <div class="metric-card">
-            <div class="metric-label">RAG System</div>
-            <div class="metric-value">Setup</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    st.write("")
-
-    st.markdown("## Explore Your Workspace")
-
-    col1, col2 = st.columns(2)
+    chunk_count = 0
+    if st.session_state.research_index:
+        chunk_count = len(
+            st.session_state.research_index["chunks"]
+        )
 
     with col1:
-        st.markdown("""
-        <div class="feature-card">
-            <h3>📄 Paper Library</h3>
-            <p>Upload and organize multiple academic research papers.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.write("")
-
-        st.markdown("""
-        <div class="feature-card">
-            <h3>🔍 Compare Papers</h3>
-            <p>Compare research methods, objectives and findings.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Uploaded Papers", paper_count)
 
     with col2:
-        st.markdown("""
-        <div class="feature-card">
-            <h3>💬 Ask AI</h3>
-            <p>Ask questions and receive answers supported by research sources.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.metric("Indexed Chunks", chunk_count)
 
-        st.write("")
-
-        st.markdown("""
-        <div class="feature-card">
-            <h3>📊 RAG Analytics</h3>
-            <p>Evaluate retrieval quality and answer performance.</p>
-        </div>
-        """, unsafe_allow_html=True)
+    with col3:
+        st.metric(
+            "Questions Asked",
+            len(st.session_state.chat_history)
+        )
 
     st.divider()
 
+    st.subheader("How ResearchMind AI Works")
+
+    st.markdown("""
+    1. **Upload:** Add multiple academic PDF documents.
+    2. **Process:** Extract text and split it into chunks.
+    3. **Index:** Generate embeddings and build search indexes.
+    4. **Retrieve:** Combine semantic and keyword search.
+    5. **Rerank:** Select the most relevant passages.
+    6. **Answer:** Generate evidence-grounded responses
+       with paper and page citations.
+    """)
+
     st.info(
-        "Getting started: Open Paper Library and upload "
-        "your first research paper."
+        "Start by opening Paper Library and uploading "
+        "your research PDFs."
     )
 
 
-# -----------------------------------------
+# ==========================================
 # PAPER LIBRARY
-# -----------------------------------------
+# ==========================================
 
-elif st.session_state.page == "Paper Library":
+elif page == "Paper Library":
 
-    st.title("📄 Research Paper Library")
+    st.title("📂 Research Paper Library")
 
     st.write(
-        "Upload and manage your academic research documents."
+        "Upload multiple research papers in PDF format "
+        "to build your searchable knowledge base."
     )
 
     uploaded_files = st.file_uploader(
-        "Upload Research Papers (PDF)",
+        "Upload Research Papers",
         type=["pdf"],
-        accept_multiple_files=True,
-        help="Upload one or more academic PDF papers."
+        accept_multiple_files=True
     )
 
     if uploaded_files:
 
-        for file in uploaded_files:
+        st.write(
+            f"Selected {len(uploaded_files)} research paper(s)."
+        )
 
-            if file.name not in st.session_state.uploaded_papers:
+        if st.button(
+            "Process Papers and Build AI Index",
+            type="primary",
+            use_container_width=True
+        ):
 
-                st.session_state.uploaded_papers[file.name] = {
-                    "name": file.name,
-                    "data": file.getvalue(),
-                    "uploaded_at": datetime.now().strftime(
-                        "%d %b %Y, %I:%M %p"
+            with st.spinner(
+                "Extracting PDFs, generating embeddings, "
+                "and preparing search indexes..."
+            ):
+
+                try:
+                    research_index = build_research_index(
+                        uploaded_files
                     )
-                }
 
-        st.success("Research papers added to your library.")
+                    st.session_state.research_index = (
+                        research_index
+                    )
+
+                    st.session_state.uploaded_papers = [
+                        {
+                            "name": file.name,
+                            "size": file.size
+                        }
+                        for file in uploaded_files
+                    ]
+
+                    st.session_state.chat_history = []
+
+                    st.success(
+                        "Research papers successfully processed!"
+                    )
+
+                    st.rerun()
+
+                except Exception as error:
+                    st.error(
+                        f"Paper processing failed: {error}"
+                    )
 
     st.divider()
 
-    st.subheader("Your Documents")
+    st.subheader("Indexed Paper Collection")
 
     if st.session_state.uploaded_papers:
 
-        for name, paper in st.session_state.uploaded_papers.items():
+        for paper in st.session_state.uploaded_papers:
 
-            with st.container(border=True):
+            st.markdown(
+                f"📄 **{paper['name']}** "
+                f"— {paper['size'] / 1024:.1f} KB"
+            )
 
-                col1, col2 = st.columns([4, 1])
+        if st.session_state.research_index:
 
-                with col1:
-                    st.markdown(f"**📕 {name}**")
-                    st.caption(
-                        f"Uploaded: {paper['uploaded_at']}"
-                    )
-
-                with col2:
-                    if st.button(
-                        "Remove",
-                        key=f"remove_{name}"
-                    ):
-                        del st.session_state.uploaded_papers[name]
-                        st.rerun()
+            st.success("These papers are indexed and searchable.")
 
     else:
-        st.info("No research papers uploaded yet.")
+        st.info("No papers have been indexed yet.")
 
 
-# -----------------------------------------
+# ==========================================
 # ASK AI
-# -----------------------------------------
+# ==========================================
 
-elif st.session_state.page == "Ask AI":
+elif page == "Ask AI":
 
     st.title("💬 Ask ResearchMind AI")
 
     st.write(
-        "Ask questions about your uploaded research papers."
+        "Ask questions about your uploaded research papers. "
+        "Answers are generated from retrieved paper passages."
     )
 
-    if not paper_count:
+    if not st.session_state.research_index:
+
         st.warning(
-            "Please upload research papers in Paper Library first."
+            "Please upload and process research papers "
+            "in the Paper Library first."
         )
 
-    question = st.text_area(
-        "Your research question",
-        placeholder=(
-            "Example: What are the main limitations "
-            "of the proposed methodology?"
-        ),
-        height=120
-    )
+    elif not groq_api_key:
 
-    if st.button("Generate Answer", type="primary"):
-
-        if not paper_count:
-            st.warning("Upload research papers first.")
-
-        elif not question.strip():
-            st.warning("Enter a question.")
-
-        else:
-            st.info(
-                "Question received. The RAG retrieval and "
-                "Groq generation pipeline will be connected "
-                "in the next development stage."
-            )
-
-
-# -----------------------------------------
-# COMPARE PAPERS
-# -----------------------------------------
-
-elif st.session_state.page == "Compare Papers":
-
-    st.title("🔍 Research Paper Comparison")
-
-    st.write(
-        "Compare objectives, methodologies, findings "
-        "and limitations across academic papers."
-    )
-
-    available_papers = list(
-        st.session_state.uploaded_papers.keys()
-    )
-
-    if len(available_papers) < 2:
-
-        st.warning(
-            "Upload at least two research papers to use comparison."
+        st.error(
+            "Groq API key is missing. Configure "
+            "GROQ_API_KEY in Streamlit secrets."
         )
 
     else:
 
-        selected = st.multiselect(
-            "Select papers to compare",
-            available_papers,
-            max_selections=5
+        for message in st.session_state.chat_history:
+
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+                if message.get("citations"):
+                    with st.expander("View source citations"):
+                        for citation in message["citations"]:
+                            st.markdown(
+                                f"""
+                                <div class="citation">
+                                <b>Paper:</b> {citation['source']}<br>
+                                <b>Page:</b> {citation['page']}<br>
+                                <b>Reranking score:</b>
+                                {citation['relevance_score']}
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+        question = st.chat_input(
+            "Ask a question about your research papers..."
         )
 
-        if st.button("Compare Selected Papers"):
+        if question:
 
-            if len(selected) < 2:
-                st.warning("Select at least two papers.")
-
-            else:
-                st.info(
-                    "AI-based comparison will be connected "
-                    "after the RAG pipeline is implemented."
-                )
-
-
-# -----------------------------------------
-# RESEARCH SUMMARY
-# -----------------------------------------
-
-elif st.session_state.page == "Research Summary":
-
-    st.title("📝 Research Paper Summary")
-
-    st.write(
-        "Generate structured summaries of your academic documents."
-    )
-
-    available_papers = list(
-        st.session_state.uploaded_papers.keys()
-    )
-
-    if available_papers:
-
-        selected_paper = st.selectbox(
-            "Choose a research paper",
-            available_papers
-        )
-
-        if st.button("Generate Summary"):
-
-            st.info(
-                "Summarization will be connected to the "
-                "document processing and Groq pipeline."
+            st.session_state.chat_history.append(
+                {
+                    "role": "user",
+                    "content": question
+                }
             )
 
-    else:
-        st.warning("Upload a paper before generating summaries.")
+            with st.chat_message("user"):
+                st.markdown(question)
+
+            with st.chat_message("assistant"):
+
+                with st.spinner(
+                    "Searching papers and generating an answer..."
+                ):
+
+                    try:
+
+                        result = answer_research_question(
+                            question=question,
+                            research_index=(
+                                st.session_state.research_index
+                            ),
+                            groq_api_key=groq_api_key
+                        )
+
+                        answer = result["answer"]
+                        citations = result["citations"]
+
+                        st.markdown(answer)
+
+                        if citations:
+
+                            with st.expander(
+                                "📖 View retrieved sources"
+                            ):
+
+                                for citation in citations:
+
+                                    st.markdown(
+                                        f"""
+                                        <div class="citation">
+                                        <b>Paper:</b>
+                                        {citation['source']}<br>
+                                        <b>Page:</b>
+                                        {citation['page']}<br>
+                                        <b>Reranking score:</b>
+                                        {citation['relevance_score']}
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True
+                                    )
+
+                        st.session_state.chat_history.append(
+                            {
+                                "role": "assistant",
+                                "content": answer,
+                                "citations": citations
+                            }
+                        )
+
+                    except Exception as error:
+
+                        st.error(
+                            f"Unable to generate answer: {error}"
+                        )
 
 
-# -----------------------------------------
+# ==========================================
 # RAG ANALYTICS
-# -----------------------------------------
+# ==========================================
 
-elif st.session_state.page == "RAG Analytics":
+elif page == "RAG Analytics":
 
-    st.title("📊 RAG Performance Analytics")
+    st.title("📊 RAG Analytics")
 
-    st.write(
-        "Monitor retrieval performance and evaluate "
-        "AI-generated research answers."
-    )
+    if not st.session_state.research_index:
 
-    st.info(
-        "Analytics will become available after we implement "
-        "document chunking, retrieval, reranking and evaluation."
-    )
+        st.info(
+            "Process research papers first to view analytics."
+        )
 
-    st.markdown("### Planned Evaluation Metrics")
+    else:
 
-    col1, col2 = st.columns(2)
+        index = st.session_state.research_index
 
-    with col1:
-        st.markdown("**Retrieval Metrics**")
-        st.write("- Context Precision")
-        st.write("- Context Recall")
-        st.write("- Retrieval Relevance")
+        chunk_stats = index["chunk_statistics"]
 
-    with col2:
-        st.markdown("**Answer Metrics**")
-        st.write("- Faithfulness")
-        st.write("- Answer Relevance")
-        st.write("- Citation Accuracy")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                "Total Chunks",
+                chunk_stats["total_chunks"]
+            )
+
+        with col2:
+            st.metric(
+                "Average Chunk Size",
+                chunk_stats["average_chunk_size"]
+            )
+
+        with col3:
+            st.metric(
+                "Total Papers",
+                len(index["papers"])
+            )
+
+        st.divider()
+
+        st.subheader("Paper Processing Statistics")
+
+        statistics_df = pd.DataFrame(
+            index["statistics"]
+        )
+
+        st.dataframe(
+            statistics_df,
+            use_container_width=True
+        )
+
+        st.subheader("Indexed Research Papers")
+
+        papers_df = pd.DataFrame(
+            index["papers"]
+        )
+
+        st.dataframe(
+            papers_df,
+            use_container_width=True
+        )
+
+        st.caption(
+            "Reranking scores are model ranking scores, "
+            "not probabilities or confidence percentages."
+        )
 
 
-# -----------------------------------------
+# ==========================================
 # FOOTER
-# -----------------------------------------
+# ==========================================
 
 st.divider()
 
 st.caption(
-    "ResearchMind AI | Advanced Retrieval-Augmented Generation "
-    "(RAG) Research Assistant"
+    "ResearchMind AI | Hybrid Retrieval • RRF • "
+    "Cross-Encoder Reranking • Grounded Generation"
 )
