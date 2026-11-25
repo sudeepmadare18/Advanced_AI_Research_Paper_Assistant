@@ -20,7 +20,7 @@ from src.reranker import (
 # MODEL CONFIGURATION
 # -----------------------------------------
 
-LLM_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "openai/gpt-oss-120b"
 
 RETRIEVAL_TOP_K = 10
 FINAL_TOP_N = 5
